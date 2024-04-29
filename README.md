@@ -35,4 +35,4 @@ This Solidity contract implements a decentralized sports betting platform where 
 
 #### Verification
 
-The code has been verified on Sepolia Scan. You can view the verification page [here](https://sepolia.scrollscan.dev/address/0x4c32d83c697780a38288a1a2b1d28300a1d47ecd#code).
+The code has been verified on Sepolia Scan. You can view the verification page [here](https://sepolia.scrollscan.dev/address/0xE400BeD016649BE81A844b0FEaFF411176B942c9).
