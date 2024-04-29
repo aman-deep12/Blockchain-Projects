@@ -1,0 +1,153 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.20;
+
+contract SportsBettingPlatform {
+    struct BettingOption {
+        uint256 totalBets;
+        mapping(address => uint256) betsByUser;
+    }
+    
+    enum EventState { OPEN, CLOSED, RESOLVED }
+    
+    event BetPlaced(address indexed user, uint256 amount, uint256 option);
+    event EventClosed(uint256 closingTime);
+    event EventResolved(bool allBetsWrong, uint256 totalCommission);
+    event Withdraw(address indexed user, uint256 amount);
+    event CommissionWithdrawn(uint256 amount);
+    
+    address public owner;
+    uint256 public totalBets;
+    BettingOption[] public bettingOptions;
+    EventState public state;
+    uint256 public closingTime;
+    mapping(address => uint256) public userWinnings;
+    uint256 public commissionRate;
+    uint256 public correctOptionIndex;
+    
+    constructor(uint256 _commissionRate, uint256 _closingTimeInSeconds, string[] memory _options) {
+        owner = msg.sender;
+        commissionRate = _commissionRate;
+        closingTime = block.timestamp + _closingTimeInSeconds;
+        state = EventState.OPEN;
+        
+        for (uint256 i = 0; i < _options.length; i++) {
+            bettingOptions.push();
+        }
+    }
+    
+    function placeBet(uint256 _option) external payable {
+        require(state == EventState.OPEN, "Event is not open for betting");
+        require(_option < bettingOptions.length, "Invalid option");
+        require(msg.value > 0, "Invalid bet amount");
+        require(block.timestamp < closingTime, "Betting closed");
+        
+        BettingOption storage selectedOption = bettingOptions[_option];
+        selectedOption.totalBets += msg.value;
+        selectedOption.betsByUser[msg.sender] += msg.value;
+        totalBets += msg.value;
+
+        emit BetPlaced(msg.sender, msg.value, _option);
+    }
+
+    function closeEvent() external {
+        require(msg.sender == owner, "Only owner can close the event");
+        require(state == EventState.OPEN, "Event is not open for betting");
+        require(block.timestamp >= closingTime, "Event closing time has not passed");
+
+        state = EventState.CLOSED;
+
+        emit EventClosed(closingTime);
+    }
+
+    function resolveEvent(bool _allBetsWrong) external {
+        require(msg.sender == owner, "Only owner can resolve the event");
+        require(state == EventState.CLOSED, "Event is not closed yet");
+
+        state = EventState.RESOLVED;
+
+        uint256 totalCommission = (totalBets * commissionRate) / 100;
+        
+        if (!_allBetsWrong) {
+            distributeWinnings(totalCommission);
+        } else {
+            payable(owner).transfer(address(this).balance);
+        }
+
+        emit EventResolved(_allBetsWrong, totalCommission);
+    }
+
+    // Function to set the correct option index after event closure
+    function setCorrectOption(uint256 _correctOptionIndex) external {
+        require(msg.sender == owner, "Only owner can set correct option");
+        require(state == EventState.CLOSED, "Event is not closed yet");
+        correctOptionIndex = _correctOptionIndex;
+    }
+
+    function distributeWinnings(uint256 _totalCommission) internal {
+        uint256 totalWinnings = address(this).balance - _totalCommission;
+
+        for (uint256 i = 0; i < bettingOptions.length; i++) {
+            BettingOption storage option = bettingOptions[i];
+
+            if (i == correctOptionIndex) {
+                uint256 optionTotalBets = option.totalBets;
+                
+                address[] memory users = getUsers(option);
+
+                for (uint256 j = 0; j < users.length; j++) {
+                    address user = users[j];
+                    uint256 betAmount = option.betsByUser[user];
+                    
+                    if (betAmount > 0) {
+                        uint256 winnings = (betAmount * totalWinnings) / optionTotalBets;
+                        userWinnings[user] += winnings;
+                    }
+                }
+            }
+        }
+    }
+    
+    function getUsers(BettingOption storage _option) internal view returns (address[] memory) {
+        address[] memory users = new address[](_option.totalBets);
+        uint256 index = 0;
+        for (uint256 i = 0; i < bettingOptions.length; i++) {
+            address user = address(uint160(uint256(uint160(i))));
+            if (_option.betsByUser[user] > 0) {
+                users[index] = user;
+                index++;
+            }
+        }
+        return users;
+    }
+
+    function withdrawWinnings() external {
+        uint256 winnings = userWinnings[msg.sender];
+        require(winnings > 0, "No winnings to withdraw");
+
+        userWinnings[msg.sender] = 0;
+        
+        payable(msg.sender).transfer(winnings);
+        
+        emit Withdraw(msg.sender, winnings);
+    }
+
+    function cancelBet(uint256 _option) external {
+        require(state == EventState.OPEN, "Event is not open for betting");
+        require(block.timestamp < closingTime, "Event closing time has passed");
+        require(_option < bettingOptions.length, "Invalid option");
+        
+        BettingOption storage selectedOption = bettingOptions[_option];
+        uint256 betAmount = selectedOption.betsByUser[msg.sender];
+        
+        require(betAmount > 0, "No bet placed on this option by the user");
+        
+        payable(msg.sender).transfer(betAmount);
+        
+        selectedOption.totalBets -= betAmount;
+        totalBets -= betAmount;
+
+        selectedOption.betsByUser[msg.sender] = 0;
+    }
+
+    receive() external payable {}
+}
